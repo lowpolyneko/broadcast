@@ -1,20 +1,24 @@
+use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
 use std::io::{Read, Write};
-use std::os::fd::{AsRawFd, FromRawFd, RawFd};
+use std::os::fd::{AsRawFd, RawFd};
 use std::slice;
 
 use epoll;
 
 const ADDR: &str = "127.0.0.1:6687";
 
-fn handle_client(mut stream: TcpStream, clients: &Vec<TcpStream>) -> std::io::Result<()> {
+fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, TcpStream>) -> std::io::Result<()> {
     let mut buffer = Vec::new();
-    stream.read(&mut buffer)?;
+    {
+        let stream = clients.get_mut(&fd).expect("failed to retrieve client stream!");
+        stream.read(&mut buffer)?;
+    }
 
     println!("{:?}", buffer); // debug
 
-    for mut c in clients {
-        if c.as_raw_fd() != stream.as_raw_fd() {
+    for mut c in clients.values() {
+        if c.as_raw_fd() != fd {
             c.write_all(&buffer)?;
         }
     }
@@ -29,7 +33,7 @@ fn main() -> std::io::Result<()> {
         events: 0,
         data: 0
     };
-    let mut client_sockets = Vec::new();
+    let mut client_sockets = HashMap::new();
 
     listener.set_nonblocking(true)?; // non-blocking accept
 
@@ -54,13 +58,11 @@ fn main() -> std::io::Result<()> {
                        epoll::Event::new(epoll::Events::EPOLLIN, socket.as_raw_fd() as u64)
                        )?;
 
-            client_sockets.push(socket);
+            client_sockets.insert(socket.as_raw_fd(), socket);
             continue;
         }
 
         // otherwise its a client
-        unsafe {
-            handle_client(TcpStream::from_raw_fd(epoll_event.data as RawFd), &client_sockets)?;
-        }
+        handle_client(epoll_event.data as RawFd, &mut client_sockets)?;
     }
 }
