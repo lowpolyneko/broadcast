@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::{TcpListener, TcpStream};
-use std::io::{Read, Write};
+use std::io::{Read, Result, Write};
 use std::os::fd::{AsRawFd, RawFd};
 use std::slice;
 
@@ -8,11 +8,11 @@ use epoll;
 
 const ADDR: &str = "127.0.0.1:6687";
 
-fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, TcpStream>) -> std::io::Result<()> {
-    let mut buffer = Vec::new();
+fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, TcpStream>) -> Result<()> {
+    let mut buffer = [0];
     {
         let stream = clients.get_mut(&fd).expect("failed to retrieve client stream!");
-        stream.read(&mut buffer)?;
+        stream.read_exact(&mut buffer)?;
     }
 
     println!("{:?}", buffer); // debug
@@ -26,7 +26,7 @@ fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, TcpStream>) -> std::io:
     Ok(())
 }
 
-fn main() -> std::io::Result<()> {
+fn main() -> Result<()> {
     let listener = TcpListener::bind(ADDR)?;
     let epoll_fd = epoll::create(true)?;
     let mut epoll_event = epoll::Event { // we're only handling epoll events one event at a time!
