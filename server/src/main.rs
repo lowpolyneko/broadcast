@@ -8,18 +8,30 @@ use epoll;
 
 const ADDR: &str = "127.0.0.1:6687";
 
-fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, TcpStream>) -> Result<()> {
-    let mut buffer = [0];
+struct ClientSession {
+    stream: TcpStream,
+    buffer: Vec<u8>
+}
+
+fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, ClientSession>) -> Result<()> {
+    let mut send_buffer = Vec::new();
+    let mut recv_buffer = [0];
+
     {
-        let stream = clients.get_mut(&fd).expect("failed to retrieve client stream!");
-        stream.read_exact(&mut buffer)?;
+        let session = clients.get_mut(&fd).expect("failed to retrieve client stream!");
+        session.stream.read_exact(&mut recv_buffer)?;
+        session.buffer.push(recv_buffer[0]);
+        if session.buffer.len() >= 255 || recv_buffer[0] == b'\0' {
+            send_buffer.clone_from(&session.buffer);
+        }
     }
 
-    println!("{}", buffer[0] as char); // debug
-
-    for mut c in clients.values() {
-        if c.as_raw_fd() != fd {
-            c.write_all(&buffer)?;
+    if !send_buffer.is_empty() {
+        println!("{}", std::str::from_utf8(&send_buffer).expect("client send invalid data!"));
+        for c in clients.values_mut() {
+            if c.stream.as_raw_fd() != fd {
+                c.stream.write_all(&send_buffer)?;
+            }
         }
     }
 
@@ -56,13 +68,18 @@ fn main() -> Result<()> {
             println!("Connection accepted!");
 
             // add new socket to epoll_fd
+            let fd = socket.as_raw_fd();
             epoll::ctl(epoll_fd,
                        epoll::ControlOptions::EPOLL_CTL_ADD,
-                       socket.as_raw_fd(),
-                       epoll::Event::new(epoll::Events::EPOLLIN, socket.as_raw_fd() as u64)
+                       fd,
+                       epoll::Event::new(epoll::Events::EPOLLIN, fd as u64)
                        )?;
 
-            client_sockets.insert(socket.as_raw_fd(), socket);
+            client_sockets.insert(socket.as_raw_fd(), ClientSession {
+                stream: socket,
+                buffer: Vec::new()
+            });
+
             continue;
         }
 
