@@ -9,9 +9,14 @@ const ADDR: &str = "127.0.0.1:6687";
 
 fn handle_client(mut stream: TcpStream, clients: &Vec<TcpStream>) -> std::io::Result<()> {
     let mut buffer = Vec::new();
-    stream.read_to_end(&mut buffer)?;
+    stream.read(&mut buffer)?;
+
+    println!("{:?}", buffer); // debug
+
     for mut c in clients {
-        c.write_all(&buffer)?;
+        if c.as_raw_fd() != stream.as_raw_fd() {
+            c.write_all(&buffer)?;
+        }
     }
 
     Ok(())
@@ -31,7 +36,7 @@ fn main() -> std::io::Result<()> {
     epoll::ctl(epoll_fd,
                epoll::ControlOptions::EPOLL_CTL_ADD,
                listener.as_raw_fd(),
-               epoll::Event::new(epoll::Events::EPOLLET, listener.as_raw_fd() as u64)
+               epoll::Event::new(epoll::Events::EPOLLIN, listener.as_raw_fd() as u64)
                )?;
 
     loop {
@@ -46,10 +51,11 @@ fn main() -> std::io::Result<()> {
             epoll::ctl(epoll_fd,
                        epoll::ControlOptions::EPOLL_CTL_ADD,
                        socket.as_raw_fd(),
-                       epoll::Event::new(epoll::Events::EPOLLET, socket.as_raw_fd() as u64)
+                       epoll::Event::new(epoll::Events::EPOLLIN, socket.as_raw_fd() as u64)
                        )?;
 
             client_sockets.push(socket);
+            continue;
         }
 
         // otherwise its a client
