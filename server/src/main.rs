@@ -15,7 +15,7 @@ fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, TcpStream>) -> Result<(
         stream.read_exact(&mut buffer)?;
     }
 
-    println!("{:?}", buffer); // debug
+    println!("{}", buffer[0] as char); // debug
 
     for mut c in clients.values() {
         if c.as_raw_fd() != fd {
@@ -43,6 +43,8 @@ fn main() -> Result<()> {
                epoll::Event::new(epoll::Events::EPOLLIN, listener.as_raw_fd() as u64)
                )?;
 
+    println!("Waiting for connections...");
+
     loop {
         epoll::wait(epoll_fd, -1, slice::from_mut(&mut epoll_event))?;
 
@@ -50,6 +52,8 @@ fn main() -> Result<()> {
         if listener.as_raw_fd() == epoll_event.data as i32 {
             let (socket, _addr) = listener.accept()?;
             socket.set_nonblocking(true)?;
+
+            println!("Connection accepted!");
 
             // add new socket to epoll_fd
             epoll::ctl(epoll_fd,
@@ -63,6 +67,10 @@ fn main() -> Result<()> {
         }
 
         // otherwise its a client
-        handle_client(epoll_event.data as RawFd, &mut client_sockets)?;
+        let fd = epoll_event.data as RawFd;
+        if handle_client(fd, &mut client_sockets).is_err() {
+            // socket closed
+            client_sockets.remove(&fd);
+        }
     }
 }
