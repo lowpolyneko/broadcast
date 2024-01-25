@@ -22,7 +22,7 @@ fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, ClientSession>) -> Resu
         session.stream.read_exact(&mut recv_buffer)?;
         session.buffer.push(recv_buffer[0]);
         if session.buffer.len() >= 255 || recv_buffer[0] == b'\0' {
-            send_buffer.clone_from(&session.buffer);
+            send_buffer.append(&mut session.buffer);
         }
     }
 
