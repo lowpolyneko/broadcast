@@ -10,33 +10,34 @@ const ADDR: &str = "127.0.0.1:6687";
 
 struct ClientSession {
     stream: TcpStream,
-    buffer: Vec<u8>
+    recv_buffer: Vec<u8>,
+    send_buffer: Vec<u8>
 }
 
 fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, ClientSession>) -> Result<()> {
-    let mut send_buffer = Vec::new();
-    let mut recv_buffer = [0];
-
+    let mut buffer = Vec::new();
     {
         let session = clients.get_mut(&fd).expect("failed to retrieve client stream!");
-        session.stream.read_exact(&mut recv_buffer)?;
-        session.buffer.push(recv_buffer[0]);
-        if session.buffer.len() >= 255 || recv_buffer[0] == b'\0' {
-            send_buffer.append(&mut session.buffer);
+        session.stream.read(&mut buffer)?;
+        session.recv_buffer.append(&mut buffer);
+        if session.recv_buffer.len() >= 255 {
+            // TODO: put in a send request
+            buffer.append(&mut session.recv_buffer);
         }
     }
 
-    if !send_buffer.is_empty() {
-        println!("{}", std::str::from_utf8(&send_buffer).expect("client send invalid data!"));
+    if !buffer.is_empty() {
         for c in clients.values_mut() {
-            if c.stream.as_raw_fd() != fd {
-                c.stream.write_all(&send_buffer)?;
-            }
+            c.send_buffer.extend_from_slice(&buffer);
         }
     }
 
     Ok(())
 }
+
+// fn send_payloads(fd: RawFd) -> Result<()> {
+//
+// }
 
 fn main() -> Result<()> {
     let listener = TcpListener::bind(ADDR)?;
@@ -77,7 +78,8 @@ fn main() -> Result<()> {
 
             client_sockets.insert(socket.as_raw_fd(), ClientSession {
                 stream: socket,
-                buffer: Vec::new()
+                send_buffer: Vec::new(),
+                recv_buffer: Vec::new()
             });
 
             continue;
