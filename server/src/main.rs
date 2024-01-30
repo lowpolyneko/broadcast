@@ -35,9 +35,11 @@ fn handle_client(fd: RawFd, clients: &mut HashMap<RawFd, ClientSession>) -> Resu
     Ok(())
 }
 
-// fn send_payloads(fd: RawFd) -> Result<()> {
-//
-// }
+fn send_payloads(session: &mut ClientSession) -> Result<()> {
+    session.stream.write_all(&session.send_buffer)?;
+    session.send_buffer.clear();
+    Ok(())
+}
 
 fn main() -> Result<()> {
     let listener = TcpListener::bind(ADDR)?;
@@ -61,35 +63,48 @@ fn main() -> Result<()> {
     loop {
         epoll::wait(epoll_fd, -1, slice::from_mut(&mut epoll_event))?;
 
-        // check for connections from the main socket
-        if listener.as_raw_fd() == epoll_event.data as i32 {
-            let (socket, _addr) = listener.accept()?;
-            socket.set_nonblocking(true)?;
+        // check for reads
+        if epoll_event.events & epoll::Events::EPOLLIN.bits() != 0 {
+            // check for connections from the main socket
+            if listener.as_raw_fd() == epoll_event.data as i32 {
+                let (socket, _addr) = listener.accept()?;
+                socket.set_nonblocking(true)?;
 
-            println!("Connection accepted!");
+                println!("Connection accepted!");
 
-            // add new socket to epoll_fd
-            let fd = socket.as_raw_fd();
-            epoll::ctl(epoll_fd,
-                       epoll::ControlOptions::EPOLL_CTL_ADD,
-                       fd,
-                       epoll::Event::new(epoll::Events::EPOLLIN, fd as u64)
-                       )?;
+                // add new socket to epoll_fd
+                let fd = socket.as_raw_fd();
+                epoll::ctl(epoll_fd,
+                           epoll::ControlOptions::EPOLL_CTL_ADD,
+                           fd,
+                           epoll::Event::new(epoll::Events::EPOLLIN.union(epoll::Events::EPOLLOUT), fd as u64)
+                           )?;
 
-            client_sockets.insert(socket.as_raw_fd(), ClientSession {
-                stream: socket,
-                send_buffer: Vec::new(),
-                recv_buffer: Vec::new()
-            });
+                client_sockets.insert(socket.as_raw_fd(), ClientSession {
+                    stream: socket,
+                    send_buffer: Vec::new(),
+                    recv_buffer: Vec::new()
+                });
 
-            continue;
+                continue;
+            }
+
+            // otherwise its a client
+            let fd = epoll_event.data as RawFd;
+            if handle_client(fd, &mut client_sockets).is_err() {
+                // socket closed
+                client_sockets.remove(&fd);
+            }
         }
 
-        // otherwise its a client
-        let fd = epoll_event.data as RawFd;
-        if handle_client(fd, &mut client_sockets).is_err() {
-            // socket closed
-            client_sockets.remove(&fd);
+        // check for writes
+        if epoll_event.events & epoll::Events::EPOLLOUT.bits() != 0 {
+            let fd = epoll_event.data as RawFd;
+            let session = client_sockets.get_mut(&fd).expect("failed to retrieve client stream!");
+            if send_payloads(session).is_err() {
+                // socket closed
+                client_sockets.remove(&fd);
+            }
         }
     }
 }
